@@ -67,9 +67,9 @@ if prompt := st.chat_input("Type your message here..."):
                     for m in st.session_state.messages:
                         messages_payload.append({"role": m["role"], "content": m["content"]})
 
-                    # Using the correct, verified Groq model name
+                    # Using the active Groq model
                     completion = client.chat.completions.create(
-                        model="llama3-70b-8192",
+                        model="openai/gpt-oss-20b",
                         messages=messages_payload,
                         temperature=0.7
                     )
