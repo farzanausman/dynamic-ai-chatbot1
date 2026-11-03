@@ -1,16 +1,11 @@
-from datetime import datetime
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
 
-# Initialize Streamlit Page Config
-st.set_page_config(
-    page_title="Dynamic AI Chatbot", page_icon="🤖", layout="centered"
-)
-
+st.set_page_config(page_title="Dynamic AI Chatbot", page_icon="🤖")
 st.title("🤖 Dynamic AI Chatbot")
 
-# Initialize Groq Client using secrets
+# Initialize Groq Client
 if "GROQ_API_KEY" in st.secrets:
   client = OpenAI(
       base_url="https://api.groq.com/openai/v1",
@@ -18,116 +13,80 @@ if "GROQ_API_KEY" in st.secrets:
   )
 else:
   st.error(
-      "GROQ_API_KEY not found. Configure it in .streamlit/secrets.toml locally"
-      " or in Streamlit Cloud Secrets."
+      "❌ GROQ_API_KEY is missing! Please add it in Streamlit Cloud Settings ->"
+      " Secrets."
   )
   client = None
 
 # Sidebar Configuration
 st.sidebar.header("Configuration")
 selected_persona = st.sidebar.selectbox(
-    "Choose AI Persona",
-    [
-        "General Assistant",
-        "Data Analyst",
-        "Creative Writer",
-        "Python Expert",
-    ],
+    "Choose AI Persona", ["General Assistant", "Data Analyst"]
 )
 
-# Optional file uploader for context analysis
 uploaded_file = st.sidebar.file_uploader(
-    "Upload Document/CSV (Optional)", type=["csv", "txt"]
+    "Upload CSV (Optional)", type=["csv"]
 )
-file_context = ""
+file_summary = ""
 
 if uploaded_file is not None:
-  if uploaded_file.name.endswith(".csv"):
-    try:
-      df = pd.read_csv(uploaded_file)
-      # Provide column names and preview data explicitly to the model
-      file_context = (
-          f"\n\n[Context from uploaded file: {uploaded_file.name}]\n"
-          f"Columns: {list(df.columns)}\n"
-          f"Data Preview (First 10 rows):\n{df.head(10).to_string()}"
-      )
-      st.sidebar.success("CSV uploaded successfully!")
-    except Exception as e:
-      st.sidebar.error(f"Error reading CSV: {e}")
-  else:
-    try:
-      file_context = f"\n\n[Context from uploaded file: {uploaded_file.name}]\n{uploaded_file.read().decode('utf-8')}"
-      st.sidebar.success("Text file uploaded successfully!")
-    except Exception as e:
-      st.sidebar.error(f"Error reading file: {e}")
+  try:
+    df = pd.read_csv(uploaded_file)
+    file_summary = (
+        f"\n\n[Uploaded CSV Data Preview]:\n{df.head(5).to_string()}"
+    )
+    st.sidebar.success("File loaded successfully!")
+  except Exception as e:
+    st.sidebar.error(f"Error reading file: {e}")
 
-# Initialize Chat History in Session State
+# Chat History
 if "messages" not in st.session_state:
   st.session_state.messages = []
 
-# Display Prior Chat Messages
 for message in st.session_state.messages:
   with st.chat_message(message["role"]):
     st.markdown(message["content"])
 
 # User Input Box
 if prompt := st.chat_input("Type your message here..."):
-  # Append user message to history
   st.session_state.messages.append({"role": "user", "content": prompt})
   with st.chat_message("user"):
     st.markdown(prompt)
 
-  # Generate Assistant Response
   if client:
     with st.chat_message("assistant"):
-      message_placeholder = st.empty()
-      full_response = ""
+      with st.spinner("Thinking..."):
+        try:
+          # Build message payload with file context
+          messages_payload = [
+              {
+                  "role": "system",
+                  "content": (
+                      f"You are a helpful {selected_persona}." + file_summary
+                  ),
+              }
+          ]
+          for m in st.session_state.messages:
+            messages_payload.append({"role": m["role"], "content": m["content"]})
 
-      # Define Persona System Prompts
-      system_prompts = {
-          "General Assistant": (
-              "You are a helpful, accurate, and polite AI assistant."
-          ),
-          "Data Analyst": (
-              "You are an expert data analyst specializing in Python, Pandas,"
-              " SQL, and data visualization. Analyze the provided dataset"
-              " accurately."
-          ),
-          "Creative Writer": (
-              "You are a creative writer skilled in storytelling, poetry, and"
-              " engaging copy."
-          ),
-          "Python Expert": (
-              "You are an expert Python developer who writes clean, efficient,"
-              " and well-documented code."
-          ),
-      }
-
-      base_system_prompt = system_prompts.get(
-          selected_persona, system_prompts["General Assistant"]
-      )
-
-      # Build messages payload for API, injecting file context into system prompt
-      current_system_content = base_system_prompt + file_context
-      messages_payload = [{"role": "system", "content": current_system_content}]
-
-      for m in st.session_state.messages:
-        messages_payload.append({"role": m["role"], "content": m["content"]})
-
-      try:
-        # API call with fixed temperature
-        completion = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=messages_payload,
-            temperature=0.7,
-        )
-        full_response = completion.choices[0].message.content
-        message_placeholder.markdown(full_response)
-      except Exception as e:
-        full_response = f"An error occurred: {e}"
-        message_placeholder.error(full_response)
-
-    # Save assistant response to session state
-    st.session_state.messages.append(
-        {"role": "assistant", "content": full_response}
-    )
+          # Using the correct, verified Groq model name
+          completion = client.chat.completions.create(
+              model="llama-3.3-70b-versatile",
+              messages=messages_payload,
+              temperature=0.7,
+          )
+          answer = completion.choices[0].message.content
+          st.markdown(answer)
+          st.session_state.messages.append(
+              {"role": "assistant", "content": answer}
+          )
+        except Exception as e:
+          error_message = (
+              f"⚠️ API Error: {e}. Please check your Groq API key in secrets."
+          )
+          st.error(error_message)
+          st.session_state.messages.append(
+              {"role": "assistant", "content": error_message}
+          )
+  else:
+    st.error("Client not initialized. Check your Groq API key secrets.")
