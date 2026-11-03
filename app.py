@@ -23,7 +23,7 @@ else:
   )
   client = None
 
-# Sidebar Configuration (Temperature Slider is removed)
+# Sidebar Configuration
 st.sidebar.header("Configuration")
 selected_persona = st.sidebar.selectbox(
     "Choose AI Persona",
@@ -43,14 +43,23 @@ file_context = ""
 
 if uploaded_file is not None:
   if uploaded_file.name.endswith(".csv"):
-    df = pd.read_csv(uploaded_file)
-    file_context = (
-        f"\n\nHere is uploaded CSV data summary:\n{df.head().to_string()}"
-    )
-    st.sidebar.success("CSV uploaded successfully!")
+    try:
+      df = pd.read_csv(uploaded_file)
+      # Provide column names and preview data explicitly to the model
+      file_context = (
+          f"\n\n[Context from uploaded file: {uploaded_file.name}]\n"
+          f"Columns: {list(df.columns)}\n"
+          f"Data Preview (First 10 rows):\n{df.head(10).to_string()}"
+      )
+      st.sidebar.success("CSV uploaded successfully!")
+    except Exception as e:
+      st.sidebar.error(f"Error reading CSV: {e}")
   else:
-    file_context = f"\n\nUploaded file content:\n{uploaded_file.read().decode('utf-8')}"
-    st.sidebar.success("Text file uploaded successfully!")
+    try:
+      file_context = f"\n\n[Context from uploaded file: {uploaded_file.name}]\n{uploaded_file.read().decode('utf-8')}"
+      st.sidebar.success("Text file uploaded successfully!")
+    except Exception as e:
+      st.sidebar.error(f"Error reading file: {e}")
 
 # Initialize Chat History in Session State
 if "messages" not in st.session_state:
@@ -81,7 +90,8 @@ if prompt := st.chat_input("Type your message here..."):
           ),
           "Data Analyst": (
               "You are an expert data analyst specializing in Python, Pandas,"
-              " SQL, and data visualization."
+              " SQL, and data visualization. Analyze the provided dataset"
+              " accurately."
           ),
           "Creative Writer": (
               "You are a creative writer skilled in storytelling, poetry, and"
@@ -93,22 +103,23 @@ if prompt := st.chat_input("Type your message here..."):
           ),
       }
 
-      current_system_prompt = (
-          system_prompts.get(selected_persona, system_prompts["General Assistant"])
-          + file_context
+      base_system_prompt = system_prompts.get(
+          selected_persona, system_prompts["General Assistant"]
       )
 
-      # Build messages payload for API
-      messages_payload = [{"role": "system", "content": current_system_prompt}]
+      # Build messages payload for API, injecting file context into system prompt
+      current_system_content = base_system_prompt + file_context
+      messages_payload = [{"role": "system", "content": current_system_content}]
+
       for m in st.session_state.messages:
         messages_payload.append({"role": m["role"], "content": m["content"]})
 
       try:
-        # API call with fixed temperature (slider removed)
+        # API call with fixed temperature
         completion = client.chat.completions.create(
             model="openai/gpt-oss-20b",
             messages=messages_payload,
-            temperature=0.7,  # Fixed default temperature value
+            temperature=0.7,
         )
         full_response = completion.choices[0].message.content
         message_placeholder.markdown(full_response)
